@@ -1,0 +1,169 @@
+// PokéTCG Nexus — Prisma Schema
+// PostgreSQL database schema for a Pokémon Trading Card collector platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Supertype {
+  POKEMON
+  TRAINER
+  ENERGY
+}
+
+enum PriceType {
+  NORMAL
+  HOLOFOIL
+  REVERSE_HOLOFOIL
+  FIRST_EDITION_HOLOFOIL
+  FIRST_EDITION_NORMAL
+}
+
+enum PriceSource {
+  TCGPLAYER
+  CARDMARKET
+}
+
+// ─────────────────────────────────────────────
+// MODELS
+// ─────────────────────────────────────────────
+
+/// Platform user. Owns collections of cards.
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  username  String   @unique
+  password  String   // bcrypt hash
+  avatarUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  collection Collection[]
+
+  @@index([email])
+  @@map("users")
+}
+
+/// A Pokémon TCG card set / expansion (e.g. "Base Set", "Vivid Voltage").
+/// Cached from the Pokémon TCG API. One set → many cards.
+model Set {
+  id           String  @id               // API id, e.g. "base1"
+  name         String
+  series       String                    // e.g. "Base", "Sword & Shield"
+  printedTotal Int
+  total        Int
+  ptcgoCode    String?
+  releaseDate  String                    // "YYYY/MM/DD" from API
+  symbolUrl    String?                   // set symbol image
+  logoUrl      String?                   // set logo image
+  legalities   Json?                     // { standard?, expanded?, unlimited? }
+
+  lastSyncedAt DateTime @default(now())  // when we last fetched from API
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cards Card[]
+
+  @@index([series])
+  @@map("sets")
+}
+
+/// A single Pokémon trading card. Cached from the Pokémon TCG API.
+/// Card data is never duplicated per user — users reference cards via Collection.
+model Card {
+  id                   String    @id     // API id, e.g. "base1-4"
+  name                 String
+  supertype            Supertype
+  subtypes             String[]          // e.g. ["Stage 2", "ex"]
+  hp                   String?
+  types                String[]          // e.g. ["Fire", "Water"]
+  evolvesFrom          String?
+  evolvesTo            String[]
+  rarity               String?           // stored as string — API has 30+ rarity values
+  number               String            // card number within set
+  artist               String?
+  flavorText           String?
+  nationalPokedexNumbers Int[]
+  regulationMark       String?
+  legalities           Json?             // { standard?, expanded?, unlimited? }
+  attacks              Json?             // array of attack objects from API
+  abilities            Json?             // array of ability objects from API
+  weaknesses           Json?             // array of weakness objects from API
+  resistances          Json?             // array of resistance objects from API
+  retreatCost          String[]
+  convertedRetreatCost Int?
+  imageSmall           String?           // small image URL
+  imageLarge           String?           // large image URL
+
+  // Relationship to Set
+  setId String
+  set   Set    @relation(fields: [setId], references: [id])
+
+  lastSyncedAt DateTime @default(now())  // when we last fetched from API
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  collection   Collection[]
+  priceHistory PriceHistory[]
+
+  @@index([name])
+  @@index([setId])
+  @@index([supertype])
+  @@index([rarity])
+  @@map("cards")
+}
+
+/// JOIN table: which users own which cards, and how many.
+/// A user can own multiple copies of the same card.
+model Collection {
+  id       String @id @default(uuid())
+  quantity Int    @default(1)
+  notes    String?                       // user notes, e.g. "PSA 10"
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  cardId String
+  card   Card   @relation(fields: [cardId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, cardId])             // one row per user-card pair
+  @@index([userId])
+  @@index([cardId])
+  @@map("collections")
+}
+
+/// Historical price snapshots for a card.
+/// Recorded periodically from TCGPlayer / Cardmarket data embedded in the API.
+model PriceHistory {
+  id        String      @id @default(uuid())
+  source    PriceSource                  // TCGPLAYER or CARDMARKET
+  priceType PriceType                    // NORMAL, HOLOFOIL, etc.
+  low       Float?
+  mid       Float?
+  high      Float?
+  market    Float?
+  directLow Float?
+
+  cardId String
+  card   Card   @relation(fields: [cardId], references: [id])
+
+  recordedAt DateTime @default(now())    // when this snapshot was taken
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([cardId, recordedAt])
+  @@index([cardId, priceType])
+  @@map("price_history")
+}
