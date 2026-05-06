@@ -23,7 +23,7 @@ export function authMiddleware(
     const token = authHeader.split(' ')[1];
     const payload = verifyToken(token);
 
-    req.userId = payload.userId;
+    req.userId = payload.sub;
     next();
   } catch (error) {
     // If it's already our AppError, pass it through
